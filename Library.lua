@@ -524,11 +524,19 @@ local Library do
             local StartPosition 
 
             local Set = function(Input)
+                if Gui:GetAttribute("UILocked") then 
+                    return 
+                end
+
                 local DragDelta = Input.Position - DragStart
                 self:Tween(TweenInfo.new(0.2, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {Position = UDim2New(StartPosition.X.Scale, StartPosition.X.Offset + DragDelta.X, StartPosition.Y.Scale, StartPosition.Y.Offset + DragDelta.Y)})
             end
 
             self:Connect("InputBegan", function(Input)
+                if Gui:GetAttribute("UILocked") then 
+                    return 
+                end
+
                 if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch then
                     Dragging = true
 
@@ -1069,127 +1077,120 @@ local Library do
         local Watermark = { }
         
         local UIHidden = false
+        local UILocked = false
 
-        local Items = { } do
-            Items["Watermark"] = Instances:Create("Frame", {
-                Parent = Library.Holder.Instance,
-                BorderColor3 = FromRGB(0, 0, 0),
-                AnchorPoint = Vector2New(0.5, 0),
+        local Items = Components.Window({
+            Position = UDim2New(0, 20, 0, 20),
+            Size = UDim2New(0, 240, 0, 45),
+            Parent = self.Holder,
+            Draggable = true,
+            IsTextButton = true
+        }) do
+            Items["Title"] = Instances:Create("Frame", {
+                Parent = Items["Inline"].Instance,
                 Name = "\0",
-                Position = UDim2New(0.5, 0, 0, 20),
-                Size = UDim2New(0, 0, 0, 25),
+                Position = UDim2New(0, 3, 0, 3),
+                BorderColor3 = FromRGB(0, 0, 0),
+                Size = UDim2New(1, -6, 1, -6),
                 BorderSizePixel = 2,
-                AutomaticSize = Enum.AutomaticSize.X,
-                BackgroundColor3 = FromRGB(12, 12, 12)
-            })  Items["Watermark"]:AddToTheme({BackgroundColor3 = "Inline", BorderColor3 = "Outline"})
-
-            Items["Watermark"]:MakeDraggable()
+                BackgroundColor3 = FromRGB(13, 13, 13)
+            })  Items["Title"]:AddToTheme({BackgroundColor3 = "Inline", BorderColor3 = "Outline"})
 
             Instances:Create("UIStroke", {
-                Parent = Items["Watermark"].Instance,
+                Parent = Items["Title"].Instance,
                 Color = FromRGB(68, 68, 68),
                 LineJoinMode = Enum.LineJoinMode.Miter,
                 ApplyStrokeMode = Enum.ApplyStrokeMode.Border
             }):AddToTheme({Color = "Border"})
 
             Items["Text"] = Instances:Create("TextLabel", {
-                Parent = Items["Watermark"].Instance,
+                Parent = Items["Title"].Instance,
                 FontFace = Library.Font,
                 TextColor3 = FromRGB(180, 180, 180),
                 BorderColor3 = FromRGB(0, 0, 0),
                 Text = Text,
                 Name = "\0",
+                Size = UDim2New(0, 120, 1, 0),
                 BackgroundTransparency = 1,
-                Size = UDim2New(0, 0, 1, 0),
+                Position = UDim2New(0, 8, 0, -1),
                 BorderSizePixel = 0,
-                AutomaticSize = Enum.AutomaticSize.X,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                TextTruncate = Enum.TextTruncate.AtEnd,
+                RichText = true,
                 TextSize = 12,
                 BackgroundColor3 = FromRGB(255, 255, 255)
             })  Items["Text"]:AddToTheme({TextColor3 = "Text"})
 
-            Instances:Create("UIPadding", {
-                Parent = Items["Watermark"].Instance,
-                PaddingRight = UDimNew(0, 32),
-                PaddingLeft = UDimNew(0, 8)
-            }) 
-
-            Items["Liner"] = Instances:Create("Frame", {
-                Parent = Items["Watermark"].Instance,
-                Name = "\0",
-                Position = UDim2New(0, -8, 0, 0),
-                BorderColor3 = FromRGB(0, 0, 0),
-                Size = UDim2New(1, 16, 0, 2),
-                BorderSizePixel = 0,
-                BackgroundColor3 = FromRGB(31, 226, 130)
-            })  Items["Liner"]:AddToTheme({BackgroundColor3 = "Accent"})
-
-            Instances:Create("UIGradient", {
-                Parent = Items["Liner"].Instance,
-                Rotation = 90,
-                Color = RGBSequence{RGBSequenceKeypoint(0, FromRGB(255, 255, 255)), RGBSequenceKeypoint(1, FromRGB(94, 94, 94))}
-            }) 
-
-            if Icon then 
-                if type(Icon) == "table" then
-                    Items["Icon"] = Instances:Create("ImageLabel", {
-                        Parent = Items["Watermark"].Instance,
-                        ImageColor3 = Icon[2] or FromRGB(255, 255, 255),
-                        ScaleType = Enum.ScaleType.Fit,
-                        BorderColor3 = FromRGB(0, 0, 0),
-                        Name = "\0",
-                        Image = "rbxassetid://" .. Icon[1],
-                        BackgroundTransparency = 1,
-                        Position = UDim2New(0, -3, 0, 4),
-                        Size = UDim2New(0, 18, 0, 18),
-                        BorderSizePixel = 0,
-                        BackgroundColor3 = FromRGB(255, 255, 255)
-                    }) 
-
-                    Items["Text"].Instance.Position = UDim2New(0, 20, 0, 0)
-                end
+            if Icon and type(Icon) == "table" then
+                Items["Icon"] = Instances:Create("ImageLabel", {
+                    Parent = Items["Title"].Instance,
+                    ImageColor3 = Icon[2] or FromRGB(255, 255, 255),
+                    ScaleType = Enum.ScaleType.Fit,
+                    BorderColor3 = FromRGB(0, 0, 0),
+                    Name = "\0",
+                    Image = "rbxassetid://" .. Icon[1],
+                    BackgroundTransparency = 1,
+                    Position = UDim2New(0, 5, 0, 5),
+                    Size = UDim2New(0, 15, 0, 15),
+                    BorderSizePixel = 0,
+                    BackgroundColor3 = FromRGB(255, 255, 255)
+                }) 
+                Items["Text"].Instance.Position = UDim2New(0, 24, 0, -1)
+                Items["Text"].Instance.Size = UDim2New(0, 105, 1, 0)
             end
 
-            -- Small UI toggle button on the watermark
-            Items["UIToggle"] = Instances:Create("TextButton", {
-                Parent = Items["Watermark"].Instance,
-                Name = "\0",
-                Size = UDim2New(0, 22, 0, 15),
-                Position = UDim2New(1, -6, 0.5, 0),
-                AnchorPoint = Vector2New(1, 0.5),
-                BackgroundColor3 = FromRGB(31, 226, 130),
-                AutoButtonColor = false,
-                Text = "",
-                BorderSizePixel = 0,
-                ZIndex = 5
-            })  Items["UIToggle"]:AddToTheme({BackgroundColor3 = "Accent"})
-
-            Instances:Create("UIStroke", {
-                Parent = Items["UIToggle"].Instance,
-                ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
-                LineJoinMode = Enum.LineJoinMode.Miter
-            }):AddToTheme({Color = "Outline"})
-
-            Items["UIToggleText"] = Instances:Create("TextLabel", {
-                Parent = Items["UIToggle"].Instance,
+            Items["ToggleUI"] = Instances:Create("TextButton", {
+                Parent = Items["Title"].Instance,
                 FontFace = Library.Font,
                 TextColor3 = FromRGB(255, 255, 255),
                 BorderColor3 = FromRGB(0, 0, 0),
                 Text = "UI",
+                AutoButtonColor = false,
                 Name = "\0",
-                Size = UDim2New(1, 0, 1, 0),
-                BackgroundTransparency = 1,
+                Size = UDim2New(0, 30, 0, 16),
+                AnchorPoint = Vector2New(1, 0.5),
+                Position = UDim2New(1, -6, 0.5, 0),
                 BorderSizePixel = 0,
                 TextSize = 10,
-                ZIndex = 6,
-                BackgroundColor3 = FromRGB(255, 255, 255)
-            })
+                BackgroundColor3 = FromRGB(31, 226, 130),
+                ZIndex = 5
+            })  Items["ToggleUI"]:AddToTheme({BackgroundColor3 = "Accent"})
+
+            Instances:Create("UIStroke", {
+                Parent = Items["ToggleUI"].Instance,
+                ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+                LineJoinMode = Enum.LineJoinMode.Miter
+            }):AddToTheme({Color = "Outline"})
+
+            Items["LockUI"] = Instances:Create("TextButton", {
+                Parent = Items["Title"].Instance,
+                FontFace = Library.Font,
+                TextColor3 = FromRGB(255, 255, 255),
+                BorderColor3 = FromRGB(0, 0, 0),
+                Text = "LOCK",
+                AutoButtonColor = false,
+                Name = "\0",
+                Size = UDim2New(0, 36, 0, 16),
+                AnchorPoint = Vector2New(1, 0.5),
+                Position = UDim2New(1, -40, 0.5, 0),
+                BorderSizePixel = 0,
+                TextSize = 10,
+                BackgroundColor3 = FromRGB(63, 63, 63),
+                ZIndex = 5
+            })  Items["LockUI"]:AddToTheme({BackgroundColor3 = "Element"})
+
+            Instances:Create("UIStroke", {
+                Parent = Items["LockUI"].Instance,
+                ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+                LineJoinMode = Enum.LineJoinMode.Miter
+            }):AddToTheme({Color = "Outline"})
         end
 
         function Watermark:SetVisibility(Bool)
-            Items["Watermark"].Instance.Visible = Bool
+            Items["Outline"].Instance.Visible = Bool
         end
 
-        Items["UIToggle"]:Connect("MouseButton1Down", function()
+        Items["ToggleUI"]:Connect("MouseButton1Down", function()
             UIHidden = not UIHidden
 
             for Index, Window in Library.Windows do
@@ -1197,12 +1198,32 @@ local Library do
             end
 
             if UIHidden then
-                Items["UIToggle"]:ChangeItemTheme({BackgroundColor3 = "Risky"})
-                Items["UIToggle"]:Tween(nil, {BackgroundColor3 = Library.Theme.Risky})
+                Items["ToggleUI"]:ChangeItemTheme({BackgroundColor3 = "Risky"})
+                Items["ToggleUI"]:Tween(nil, {BackgroundColor3 = Library.Theme.Risky})
             else
-                Items["UIToggle"]:ChangeItemTheme({BackgroundColor3 = "Accent"})
-                Items["UIToggle"]:Tween(nil, {BackgroundColor3 = Library.Theme.Accent})
+                Items["ToggleUI"]:ChangeItemTheme({BackgroundColor3 = "Accent"})
+                Items["ToggleUI"]:Tween(nil, {BackgroundColor3 = Library.Theme.Accent})
             end
+        end)
+
+        Items["LockUI"]:Connect("MouseButton1Down", function()
+            UILocked = not UILocked
+
+            if UILocked then
+                Items["LockUI"]:ChangeItemTheme({BackgroundColor3 = "Accent"})
+                Items["LockUI"]:Tween(nil, {BackgroundColor3 = Library.Theme.Accent})
+            else
+                Items["LockUI"]:ChangeItemTheme({BackgroundColor3 = "Element"})
+                Items["LockUI"]:Tween(nil, {BackgroundColor3 = Library.Theme.Element})
+            end
+
+            for _, Window in Library.Windows do
+                if Window.Items and Window.Items["Outline"] then
+                    Window.Items["Outline"].Instance:SetAttribute("UILocked", UILocked)
+                end
+            end
+
+            Items["Outline"].Instance:SetAttribute("UILocked", UILocked)
         end)
 
         return Watermark
@@ -3317,7 +3338,7 @@ local Library do
             local SlideX = MathClamp((Input.Position.X - Items["Palette"].Instance.AbsolutePosition.X) / Items["Palette"].Instance.AbsoluteSize.X, 0, 0.989)
             local SlideY = MathClamp((Input.Position.Y - Items["Palette"].Instance.AbsolutePosition.Y) / Items["Palette"].Instance.AbsoluteSize.Y, 0, 0.989)
 
-            Items["PaletteDragger"]:Tween(TweenInfo.new(0.2, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {Position = UDim2New(SlideX, 0, SlideY, 0)})
+            Items["PaletteDragger"].Instance.Position = UDim2New(SlideX, 0, SlideY, 0)
             Colorpicker:Update()        
             
             OldColor = Colorpicker.Color
@@ -3334,7 +3355,7 @@ local Library do
 
             local PositionX = MathClamp((Input.Position.X - Items["Hue"].Instance.AbsolutePosition.X) / Items["Hue"].Instance.AbsoluteSize.X, 0, 0.994)
 
-            Items["HueDragger"]:Tween(TweenInfo.new(0.2, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {Position = UDim2New(PositionX, 0, 0, 0)})
+            Items["HueDragger"].Instance.Position = UDim2New(PositionX, 0, 0, 0)
             Colorpicker:Update()
         end
 
@@ -3353,7 +3374,7 @@ local Library do
 
             local PositionX = MathClamp((Input.Position.X - Items["Alpha"].Instance.AbsolutePosition.X) / Items["Alpha"].Instance.AbsoluteSize.X, 0, 0.994)
 
-            Items["AlphaDragger"]:Tween(TweenInfo.new(0.2, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {Position = UDim2New(PositionX, 0, 0, 0)})
+            Items["AlphaDragger"].Instance.Position = UDim2New(PositionX, 0, 0, 0)
             Colorpicker:Update(true)
         end
 
