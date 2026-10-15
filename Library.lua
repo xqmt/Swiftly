@@ -199,14 +199,13 @@ local Library do
             Themes = "testpath/Themes"
         },
 
-        Images = { -- you're welcome to reupload the images and replace it with your own links
+        Images = {
             ["Saturation"] = {"Saturation.png", "https://github.com/sametexe001/images/blob/main/saturation.png?raw=true" },
             ["Value"] = { "Value.png", "https://github.com/sametexe001/images/blob/main/value.png?raw=true" },
             ["Hue"] = { "Hue.png", "https://github.com/sametexe001/images/blob/main/horizontalhue.png?raw=true" },
             ["Checkers"] = { "Checkers.png", "https://github.com/sametexe001/images/blob/main/checkers.png?raw=true" },
         },
 
-        -- Ignore below
         Pages = { },
         Sections = { },
 
@@ -236,6 +235,8 @@ local Library do
 
         Windows = { },
     }
+
+    local Components = { }   -- <<< FORWARD DECLARE (แก้ error)
 
     local Keys = {
         ["Unknown"]           = "Unknown",
@@ -1513,7 +1514,8 @@ local Library do
         end)
     end
 
-    local Components = { } do
+    -- [Components] - ใช้ forward-declared "Components" ไม่ต้อง local ซ้ำ
+    do
         Components.Window = function(Data)
             local Items = { } do 
                 if not Data.IsTextButton then
