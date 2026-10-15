@@ -1,4 +1,4 @@
-local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/i77lhm/Libraries/refs/heads/main/Utopia/Library.lua"))()
+local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/xqmt/Swiftly/refs/heads/main/Library.lua"))()
 
 local Window = Library:Window({
     Name = "U T O P I A",
