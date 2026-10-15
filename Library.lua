@@ -233,6 +233,8 @@ local Library do
         NotifHolder = nil,
         Font = nil,
         KeyList = nil,
+
+        Windows = { },
     }
 
     local Keys = {
@@ -769,11 +771,14 @@ local Library do
         return MathFloor(Number * Multiplier) / Multiplier
     end
 
-    Library.IsMouseOverFrame = function(self, Frame)
+    Library.IsMouseOverFrame = function(self, Frame, Position)
         local AbsolutePosition = Frame.AbsolutePosition
         local AbsoluteSize = Frame.AbsoluteSize
 
-        if Mouse.X >= AbsolutePosition.X and Mouse.X <= AbsolutePosition.X + AbsoluteSize.X and Mouse.Y >= AbsolutePosition.Y and Mouse.Y <= AbsolutePosition.Y + AbsoluteSize.Y then    
+        local X = Position and Position.X or Mouse.X
+        local Y = Position and Position.Y or Mouse.Y
+
+        if X >= AbsolutePosition.X and X <= AbsolutePosition.X + AbsoluteSize.X and Y >= AbsolutePosition.Y and Y <= AbsolutePosition.Y + AbsoluteSize.Y then    
             return true
         end
     end
@@ -1062,6 +1067,8 @@ local Library do
 
     Library.Watermark = function(self, Text, Icon)
         local Watermark = { }
+        
+        local UIHidden = false
 
         local Items = { } do
             Items["Watermark"] = Instances:Create("Frame", {
@@ -1102,7 +1109,7 @@ local Library do
 
             Instances:Create("UIPadding", {
                 Parent = Items["Watermark"].Instance,
-                PaddingRight = UDimNew(0, 8),
+                PaddingRight = UDimNew(0, 32),
                 PaddingLeft = UDimNew(0, 8)
             }) 
 
@@ -1141,11 +1148,62 @@ local Library do
                     Items["Text"].Instance.Position = UDim2New(0, 20, 0, 0)
                 end
             end
+
+            -- Small UI toggle button on the watermark
+            Items["UIToggle"] = Instances:Create("TextButton", {
+                Parent = Items["Watermark"].Instance,
+                Name = "\0",
+                Size = UDim2New(0, 22, 0, 15),
+                Position = UDim2New(1, -6, 0.5, 0),
+                AnchorPoint = Vector2New(1, 0.5),
+                BackgroundColor3 = FromRGB(31, 226, 130),
+                AutoButtonColor = false,
+                Text = "",
+                BorderSizePixel = 0,
+                ZIndex = 5
+            })  Items["UIToggle"]:AddToTheme({BackgroundColor3 = "Accent"})
+
+            Instances:Create("UIStroke", {
+                Parent = Items["UIToggle"].Instance,
+                ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+                LineJoinMode = Enum.LineJoinMode.Miter
+            }):AddToTheme({Color = "Outline"})
+
+            Items["UIToggleText"] = Instances:Create("TextLabel", {
+                Parent = Items["UIToggle"].Instance,
+                FontFace = Library.Font,
+                TextColor3 = FromRGB(255, 255, 255),
+                BorderColor3 = FromRGB(0, 0, 0),
+                Text = "UI",
+                Name = "\0",
+                Size = UDim2New(1, 0, 1, 0),
+                BackgroundTransparency = 1,
+                BorderSizePixel = 0,
+                TextSize = 10,
+                ZIndex = 6,
+                BackgroundColor3 = FromRGB(255, 255, 255)
+            })
         end
 
         function Watermark:SetVisibility(Bool)
             Items["Watermark"].Instance.Visible = Bool
         end
+
+        Items["UIToggle"]:Connect("MouseButton1Down", function()
+            UIHidden = not UIHidden
+
+            for Index, Window in Library.Windows do
+                Window:SetOpen(not UIHidden)
+            end
+
+            if UIHidden then
+                Items["UIToggle"]:ChangeItemTheme({BackgroundColor3 = "Risky"})
+                Items["UIToggle"]:Tween(nil, {BackgroundColor3 = Library.Theme.Risky})
+            else
+                Items["UIToggle"]:ChangeItemTheme({BackgroundColor3 = "Accent"})
+                Items["UIToggle"]:Tween(nil, {BackgroundColor3 = Library.Theme.Accent})
+            end
+        end)
 
         return Watermark
     end
@@ -2208,7 +2266,7 @@ local Library do
             if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch then 
                 Slider.Sliding = true
 
-                local SizeX = (Mouse.X - Items["RealSlider"].Instance.AbsolutePosition.X) / Items["RealSlider"].Instance.AbsoluteSize.X
+                local SizeX = (Input.Position.X - Items["RealSlider"].Instance.AbsolutePosition.X) / Items["RealSlider"].Instance.AbsoluteSize.X
                 local Value = ((Data.Max - Data.Min) * SizeX) + Data.Min
 
                 Slider:Set(Value)
@@ -2224,7 +2282,7 @@ local Library do
         Library:Connect(UserInputService.InputChanged, function(Input)
             if Input.UserInputType == Enum.UserInputType.MouseMovement or Input.UserInputType == Enum.UserInputType.Touch then
                 if Slider.Sliding then
-                    local SizeX = (Mouse.X - Items["RealSlider"].Instance.AbsolutePosition.X) / Items["RealSlider"].Instance.AbsoluteSize.X
+                    local SizeX = (Input.Position.X - Items["RealSlider"].Instance.AbsolutePosition.X) / Items["RealSlider"].Instance.AbsoluteSize.X
                     local Value = ((Data.Max - Data.Min) * SizeX) + Data.Min
 
                     Slider:Set(Value)
@@ -2608,7 +2666,7 @@ local Library do
                     return 
                 end
 
-                if Library:IsMouseOverFrame(Items["OptionHolder"].Instance) then 
+                if Library:IsMouseOverFrame(Items["OptionHolder"].Instance, Input.Position) then 
                     return
                 end
 
@@ -3339,7 +3397,7 @@ local Library do
         end)
 
         Library:Connect(UserInputService.InputBegan, function(Input)
-            if Input.UserInputType == Enum.UserInputType.MouseButton1 then
+            if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch then
                 if Debounce then 
                     return 
                 end
@@ -3348,7 +3406,7 @@ local Library do
                     return 
                 end
 
-                if Library:IsMouseOverFrame(Items["ColorpickerWindow"]["Outline"].Instance) then 
+                if Library:IsMouseOverFrame(Items["ColorpickerWindow"]["Outline"].Instance, Input.Position) then 
                     return 
                 end
 
@@ -3357,46 +3415,46 @@ local Library do
         end)
 
         Items["Palette"]:Connect("InputBegan", function(Input)
-            if Input.UserInputType == Enum.UserInputType.MouseButton1 then
+            if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch then
                 SlidingPalette = true
                 Colorpicker:SlidePalette(Input)
             end
         end)
 
         Items["Palette"]:Connect("InputEnded", function(Input)
-            if Input.UserInputType == Enum.UserInputType.MouseButton1 then
+            if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch then
                 SlidingPalette = false
             end
         end)
 
         Items["Hue"]:Connect("InputBegan", function(Input)
-            if Input.UserInputType == Enum.UserInputType.MouseButton1 then
+            if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch then
                 SlidingHue = true
                 Colorpicker:SlideHue(Input)
             end
         end)
 
         Items["Hue"]:Connect("InputEnded", function(Input)
-            if Input.UserInputType == Enum.UserInputType.MouseButton1 then
+            if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch then
                 SlidingHue = false
             end
         end)
 
         Items["Alpha"]:Connect("InputBegan", function(Input)
-            if Input.UserInputType == Enum.UserInputType.MouseButton1 then
+            if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch then
                 SlidingAlpha = true
                 Colorpicker:SlideAlpha(Input)
             end
         end)
 
         Items["Alpha"]:Connect("InputEnded", function(Input)
-            if Input.UserInputType == Enum.UserInputType.MouseButton1 then
+            if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch then
                 SlidingAlpha = false
             end
         end)
 
         Library:Connect(UserInputService.InputChanged, function(Input)
-            if Input.UserInputType == Enum.UserInputType.MouseMovement then
+            if Input.UserInputType == Enum.UserInputType.MouseMovement or Input.UserInputType == Enum.UserInputType.Touch then
                 if SlidingPalette then
                     Colorpicker:SlidePalette(Input)
                 end
@@ -3780,7 +3838,7 @@ local Library do
                 return
             end
 
-            if Library:IsMouseOverFrame(Items["KeybindWindow"]["Outline"].Instance) then 
+            if Library:IsMouseOverFrame(Items["KeybindWindow"]["Outline"].Instance, Input.Position) then 
                 return
             end
 
@@ -4320,6 +4378,8 @@ local Library do
                 Window:SetOpen(not Window.IsOpen)
             end
         end)
+
+        TableInsert(self.Windows, Window)
 
         Window.Items = Items
         return setmetatable(Window, self)
