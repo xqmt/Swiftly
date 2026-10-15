@@ -1,0 +1,1235 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UIS = game:GetService("UserInputService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Teams = game:GetService("Teams")
+local StarterGui = game:GetService("StarterGui")
+
+local LocalPlayer = Players.LocalPlayer
+
+local genv = (getgenv and getgenv()) or _G
+if genv.__SilentAimWallbangLoaded then warn("[Silent Aim] already running") return end
+genv.__SilentAimWallbangLoaded = true
+
+local CFG = {
+    enabled = true,
+    wallbang = true,
+    wallbangrange = 20,
+    teamcheck = true,
+    wallcheck = true,
+    deathcheck = true,
+    ffcheck = true,
+    hostilecheck = true,
+    trespasscheck = true,
+    criminalsnoinnmates = true,
+    inmatesnocriminals = true,
+    inmatesTargetCriminals = false,
+    criminalsTargetSuspectedInmates = false,
+    vehiclecheck = false,
+    fov = 200,
+    aimpart = "Head",
+    randomparts = false,
+    partslist = {"Head", "Torso", "LeftArm", "RightArm", "LeftLeg", "RightLeg", "HumanoidRootPart"},
+    prioritizeclosest = true,
+    silentaimmaxdist = 0,
+    shieldbreaker = true,
+    shieldfrontangle = 0.3,
+    shieldrandomhead = true,
+    shieldheadchance = 100,
+    hitchance = 100,
+    missspread = 0,
+    ifplayerstill = false,
+    stillthreshold = 0.5,
+    taseralwayshit = false,
+    taserbypasshostile = false,
+    taserbypasstrespass = false,
+    shotgunnaturalspread = false,
+    shotgungamehandled = false,
+    hitchanceAutoOnly = false,
+    velocitylead = false,
+    velocityleadfactor = 0.15,
+}
+
+-- ======================= โหลดฟอนต์ smallest pixel =======================
+local fontFileName = "smallest_pixel.ttf"
+local fontUrl = "https://raw.githubusercontent.com/mon-2d/loader/main/fonts/smallest%20pixel"
+
+if not isfile(fontFileName) then
+    local success, err = pcall(function()
+        writefile(fontFileName, game:HttpGet(fontUrl))
+    end)
+    if not success then
+        warn("[Font] ดาวน์โหลดฟอนต์ไม่สำเร็จ: " .. tostring(err))
+    end
+end
+
+local customFont = nil
+if isfile(fontFileName) then
+    local success, fontAsset = pcall(function()
+        return getcustomasset(fontFileName)
+    end)
+    if success then
+        local ok, fontObj = pcall(function()
+            return Font.new(fontAsset)
+        end)
+        if ok then
+            customFont = fontObj
+        end
+    else
+        warn("[Font] โหลดฟอนต์ไม่สำเร็จ: " .. tostring(fontAsset))
+    end
+end
+
+local function applyFont(label)
+    if customFont then
+        label.FontFace = customFont
+    else
+        label.Font = Enum.Font.GothamBold
+    end
+end
+
+-- ======================= Teams =======================
+local Teams_ = {
+    Guards = Teams:FindFirstChild("Guards"),
+    Inmates = Teams:FindFirstChild("Inmates"),
+    Criminals = Teams:FindFirstChild("Criminals"),
+}
+
+task.spawn(function()
+    for _ = 1, 20 do
+        if Teams_.Guards and Teams_.Inmates and Teams_.Criminals then break end
+        Teams_.Guards = Teams_.Guards or Teams:FindFirstChild("Guards")
+        Teams_.Inmates = Teams_.Inmates or Teams:FindFirstChild("Inmates")
+        Teams_.Criminals = Teams_.Criminals or Teams:FindFirstChild("Criminals")
+        task.wait(0.5)
+    end
+end)
+
+local State = {
+    currentGun = nil,
+    rng = Random.new(),
+    lastShotTime = 0,
+    lastShotResult = false,
+}
+
+local function safeWrap(fn)
+    if newcclosure then
+        local ok, w = pcall(newcclosure, fn)
+        if ok and w then return w end
+    end
+    return fn
+end
+
+local partMap = {
+    Torso = {"Torso", "UpperTorso", "LowerTorso"},
+    LeftArm = {"Left Arm", "LeftUpperArm", "LeftLowerArm", "LeftHand"},
+    RightArm = {"Right Arm", "RightUpperArm", "RightLowerArm", "RightHand"},
+    LeftLeg = {"Left Leg", "LeftUpperLeg", "LeftLowerLeg", "LeftFoot"},
+    RightLeg = {"Right Leg", "RightUpperLeg", "RightLowerLeg", "RightFoot"},
+}
+
+local function getPart(char, name)
+    if not char then return nil end
+    local p = char:FindFirstChild(name)
+    if p then return p end
+    local alt = partMap[name]
+    if alt then
+        for _, n in ipairs(alt) do
+            local part = char:FindFirstChild(n)
+            if part then return part end
+        end
+    end
+    return char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Head")
+end
+
+local function getTargetPart(char)
+    if not char then return nil end
+    if CFG.shieldbreaker then
+        local shield = char:FindFirstChild("RiotShieldPart")
+        if shield and shield:IsA("BasePart") then
+            local hp = shield:GetAttribute("Health")
+            if hp and hp > 0 then
+                local myHrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                local theirHrp = char:FindFirstChild("HumanoidRootPart")
+                if myHrp and theirHrp then
+                    local toMe = (myHrp.Position - theirHrp.Position).Unit
+                    if toMe:Dot(theirHrp.CFrame.LookVector) > CFG.shieldfrontangle then
+                        if CFG.shieldrandomhead and State.rng:NextInteger(1, 100) <= CFG.shieldheadchance then
+                            return getPart(char, "Head")
+                        end
+                        return shield
+                    end
+                end
+            end
+        end
+    end
+    local partName
+    if CFG.randomparts then
+        local list = CFG.partslist
+        partName = (list and #list > 0) and list[State.rng:NextInteger(1, #list)] or "Head"
+    else
+        partName = CFG.aimpart
+    end
+    return getPart(char, partName)
+end
+
+local function isDead(player)
+    local hum = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+    return not hum or hum.Health <= 0
+end
+
+local function isStanding(player)
+    local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+    if not hrp then return false end
+    local v = hrp.AssemblyLinearVelocity
+    return Vector2.new(v.X, v.Z).Magnitude <= CFG.stillthreshold
+end
+
+local wallParams = RaycastParams.new()
+wallParams.FilterType = Enum.RaycastFilterType.Exclude
+wallParams.IgnoreWater = true
+wallParams.RespectCanCollide = false
+pcall(function() wallParams.CollisionGroup = "ClientBullet" end)
+
+local function wallBetween(startPos, endPos, targetChar)
+    local myChar = LocalPlayer.Character
+    if not myChar then return true end
+    wallParams.FilterDescendantsInstances = {myChar, targetChar}
+    local direction = endPos - startPos
+    local unit = direction.Unit
+    local currentStart = startPos
+    local remaining = direction.Magnitude
+    for _ = 1, 10 do
+        local result = workspace:Raycast(currentStart, unit * remaining, wallParams)
+        if not result then return false end
+        local hit = result.Instance
+        if hit.Transparency < 0.8 and hit.CanCollide then return true end
+        remaining = remaining - (result.Position - currentStart).Magnitude - 0.01
+        if remaining <= 0 then return false end
+        currentStart = result.Position + unit * 0.01
+    end
+    return false
+end
+
+local function quickCheck(player)
+    if not player or player == LocalPlayer or not player.Character then return false end
+    if not getTargetPart(player.Character) then return false end
+    if CFG.deathcheck and isDead(player) then return false end
+    if CFG.ffcheck and player.Character:FindFirstChildOfClass("ForceField") then return false end
+    if CFG.teamcheck and player.Team == LocalPlayer.Team then return false end
+    if CFG.vehiclecheck then
+        local hum = player.Character:FindFirstChildOfClass("Humanoid")
+        if hum and hum.SeatPart then return false end
+    end
+    if LocalPlayer.Team == Teams_.Criminals and player.Team == Teams_.Inmates then
+        if CFG.criminalsTargetSuspectedInmates then
+            local c = player.Character
+            if not (c:GetAttribute("Hostile") or c:GetAttribute("Trespassing")) then return false end
+        elseif CFG.criminalsnoinnmates then
+            return false
+        end
+    end
+    if LocalPlayer.Team == Teams_.Inmates and player.Team == Teams_.Criminals then
+        if CFG.inmatesnocriminals and not CFG.inmatesTargetCriminals then return false end
+    end
+    if CFG.hostilecheck or CFG.trespasscheck then
+        local gun = State.currentGun
+        local isTaser = gun and gun:GetAttribute("Projectile") == "Taser"
+        local bypassHostile = CFG.taserbypasshostile and isTaser
+        local bypassTrespass = CFG.taserbypasstrespass and isTaser
+        local c = player.Character
+        if LocalPlayer.Team == Teams_.Guards and player.Team == Teams_.Inmates then
+            local hostile = c:GetAttribute("Hostile")
+            local trespass = c:GetAttribute("Trespassing")
+            if CFG.hostilecheck and CFG.trespasscheck then
+                if not bypassHostile and not bypassTrespass then
+                    if not hostile and not trespass then return false end
+                end
+            elseif CFG.hostilecheck and not bypassHostile then
+                if not hostile then return false end
+            elseif CFG.trespasscheck and not bypassTrespass then
+                if not trespass then return false end
+            end
+        end
+    end
+    return true
+end
+
+local function getAimTarget(player)
+    local part = getTargetPart(player and player.Character)
+    if not part then return nil, nil end
+    return part, part.Position
+end
+
+local wallbangBlocked, wallbangResolve, wallbangRewriteShots
+
+local function isValidTarget(player)
+    if typeof(player) ~= "Instance" or not player:IsA("Player") then return false end
+    if not quickCheck(player) then return false end
+    if CFG.wallcheck then
+        local myHead = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Head")
+        local part, targetPos = getAimTarget(player)
+        if myHead and targetPos then
+            if wallBetween(myHead.Position, targetPos, player.Character) then
+                if CFG.wallbang and wallbangBlocked then
+                    local ok, blocked = pcall(wallbangBlocked, myHead.Position, targetPos, part, player.Character)
+                    if ok and not blocked then return true end
+                end
+                return false
+            end
+        end
+    end
+    return true
+end
+
+local function rollHit()
+    local now = os.clock()
+    if now - State.lastShotTime > 0.15 then
+        State.lastShotTime = now
+        local chance = CFG.hitchance
+        if chance >= 100 then State.lastShotResult = true
+        elseif chance <= 0 then State.lastShotResult = false
+        else State.lastShotResult = State.rng:NextInteger(1, 100) <= chance end
+    end
+    return State.lastShotResult
+end
+
+local function getMissPos(targetPos)
+    local spread = CFG.missspread
+    local angle = State.rng:NextNumber() * math.pi * 2
+    local d = State.rng:NextNumber() * spread
+    local yOffset = (State.rng:NextNumber() - 0.5) * spread
+    return targetPos + Vector3.new(math.cos(angle) * d, yOffset, math.sin(angle) * d)
+end
+
+local function getClosest(fovRadius)
+    fovRadius = fovRadius or CFG.fov
+    local camera = workspace.CurrentCamera
+    if not camera then return nil, nil end
+    local lastInput = UIS:GetLastInputType()
+    local locked = (lastInput == Enum.UserInputType.Touch) or (UIS.MouseBehavior == Enum.MouseBehavior.LockCenter)
+    local aimPos
+    if locked then
+        local vs = camera.ViewportSize
+        aimPos = Vector2.new(vs.X / 2, vs.Y / 2)
+    else
+        aimPos = UIS:GetMouseLocation()
+    end
+    local myRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    local maxDist = tonumber(CFG.silentaimmaxdist) or 0
+    local candidates = {}
+    for _, player in ipairs(Players:GetPlayers()) do
+        if quickCheck(player) then
+            local _, pos = getAimTarget(player)
+            if pos then
+                local sp, onScreen = camera:WorldToViewportPoint(pos)
+                if onScreen and sp.Z > 0 then
+                    local dist = (Vector2.new(sp.X, sp.Y) - aimPos).Magnitude
+                    if dist < fovRadius then
+                        local tooFar = maxDist > 0 and myRoot and (pos - myRoot.Position).Magnitude > maxDist
+                        if not tooFar then
+                            candidates[#candidates + 1] = {target = player, dist = dist, pos = pos}
+                        end
+                    end
+                end
+            end
+        end
+    end
+    if CFG.prioritizeclosest then
+        table.sort(candidates, function(a, b) return a.dist < b.dist end)
+    else
+        for i = #candidates, 2, -1 do
+            local j = State.rng:NextInteger(1, i)
+            candidates[i], candidates[j] = candidates[j], candidates[i]
+        end
+    end
+    for _, c in ipairs(candidates) do
+        if isValidTarget(c.target) then
+            return c.target, c.pos
+        end
+    end
+    return nil, nil
+end
+
+local OriginScanner = {Cache = {}, Fail = {}, Offset = 0, Memory = setmetatable({}, {__mode = "k"})}
+local rayParams = RaycastParams.new()
+local overlapParams = OverlapParams.new()
+pcall(function() rayParams.CollisionGroup = "ClientBullet" end)
+rayParams.FilterType = Enum.RaycastFilterType.Exclude
+pcall(function() overlapParams.CollisionGroup = "ClientBullet" end)
+overlapParams.FilterType = Enum.RaycastFilterType.Exclude
+
+local function checkPoint(pos, params)
+    for _, part in ipairs(workspace:GetPartBoundsInRadius(pos, 0, params)) do
+        if part.CanCollide and (part:GetClosestPointOnSurface(pos) - pos).Magnitude <= 0.0001 then
+            return false
+        end
+    end
+    return true
+end
+
+local scanOffsets = {
+    Vector3.new(0, 1, 0), Vector3.new(1, 0, 0), Vector3.new(0.7, -0.5, -0.5),
+    Vector3.new(-0.1, -0.8, -0.8), Vector3.new(-0.8, -0.5, -0.5), Vector3.new(-1, 0, 0),
+    Vector3.new(-0.8, 0.4, 0.4), Vector3.new(0, 0.7, 0.7), Vector3.new(0.7, 0.5, 0.5),
+    Vector3.new(1, 0, 0), Vector3.new(0.7, 0, -0.8), Vector3.new(-0.1, 0, -1),
+    Vector3.new(-0.8, 0, -0.8), Vector3.new(-1, 0, 0), Vector3.new(-0.8, 0, 0.7),
+    Vector3.new(0, 0, 1), Vector3.new(0.7, 0, 0.7), Vector3.new(1, 0, 0),
+    Vector3.new(0.7, 0.4, -0.5), Vector3.new(-0.1, 0.7, -0.8), Vector3.new(-0.8, 0.4, -0.5),
+    Vector3.new(-1, -0.1, 0), Vector3.new(-0.8, -0.5, 0.4), Vector3.new(0, -0.8, 0.7),
+    Vector3.new(0.7, -0.6, 0.5), Vector3.new(0, -1, 0),
+}
+
+function OriginScanner:Scan(origin, target, extra, part, entityRoot)
+    if self.Cache[part] then return table.unpack(self.Cache[part]) end
+    if not entityRoot then return nil end
+    local hitboxPositions = {}
+    if checkPoint(target, overlapParams) then
+        if extra and (origin - extra).Magnitude < 7.5 then
+            self.Cache[part] = {extra}
+            return extra
+        end
+        table.insert(hitboxPositions, target)
+    end
+    local scanPositions = {origin}
+    local diff = CFrame.lookAt(origin * Vector3.new(1, 0, 1), target * Vector3.new(1, 0, 1)).LookVector
+    for _, normal in ipairs(Enum.NormalId:GetEnumItems()) do
+        local offset = Vector3.fromNormalId(normal)
+        if (offset * Vector3.new(1, 0, 1)):Dot(-diff) > -0.5 then
+            local pos = entityRoot.Position + offset * 7.4
+            if checkPoint(pos, overlapParams) then
+                table.insert(hitboxPositions, pos)
+            end
+        end
+    end
+    for _, offset in ipairs(scanOffsets) do
+        if (offset * Vector3.new(1, 0, 1)):Dot(diff) > -0.5 then
+            local pos = origin + offset * (7 - math.min(self.Offset, 1))
+            if checkPoint(pos, overlapParams) then
+                table.insert(scanPositions, pos)
+            end
+        end
+    end
+    local function try(hitboxes, scans)
+        for _, hitbox in ipairs(hitboxes) do
+            for _, pos in ipairs(scans) do
+                local ray = workspace:Raycast(hitbox, (pos - hitbox), rayParams)
+                if not ray then
+                    self.Cache[part] = {pos, hitbox ~= target and hitbox or nil}
+                    return pos, hitbox
+                end
+            end
+        end
+    end
+    local p1, p2 = try(hitboxPositions, scanPositions)
+    if p1 then return p1, p2 end
+    local range = tonumber(CFG.wallbangrange) or 7
+    if range > 7.5 and not self.Fail[part] then
+        local now = os.clock()
+        local mem = self.Memory[part]
+        if mem and now - mem.t < (mem.fail and 0.2 or 0.06) then
+            if mem.fail then
+                self.Fail[part] = true
+                return nil
+            end
+            local h = mem.hit or target
+            if not workspace:Raycast(h, mem.pos - h, rayParams) then
+                self.Cache[part] = {mem.pos, mem.hit}
+                return mem.pos, mem.hit
+            end
+        end
+        local deadline = now + 0.009
+        local toTarget = target - origin
+        local dist = toTarget.Magnitude
+        local fwd = dist > 0.001 and toTarget.Unit or Vector3.new(0, 0, 1)
+        local up = Vector3.new(0, 1, 0)
+        local right = fwd:Cross(up)
+        right = right.Magnitude > 0.001 and right.Unit or Vector3.new(1, 0, 0)
+        local steps = math.clamp(math.ceil((range - 7) / 5) + 1, 2, 8)
+        local radii = {}
+        for i = 1, steps do
+            radii[i] = 7 + (range - 7) * i / steps
+        end
+        local hbMax = 7.4 + math.min((range - 7) * 0.75, 30)
+        local hbDirs = {}
+        for _, normal in ipairs(Enum.NormalId:GetEnumItems()) do
+            table.insert(hbDirs, Vector3.fromNormalId(normal))
+        end
+        for _, d in ipairs({Vector3.new(1, 0, 1), Vector3.new(1, 0, -1), Vector3.new(-1, 0, 1), Vector3.new(-1, 0, -1)}) do
+            table.insert(hbDirs, d.Unit)
+        end
+        local extHitboxes = {}
+        if checkPoint(target, overlapParams) then
+            table.insert(extHitboxes, target)
+        end
+        for _, r in ipairs({(7.4 + hbMax) / 2, hbMax}) do
+            for _, d in ipairs(hbDirs) do
+                local pos = entityRoot.Position + d * r
+                if checkPoint(pos, overlapParams) then
+                    table.insert(extHitboxes, pos)
+                end
+            end
+        end
+        local rootPos = entityRoot.Position
+        local horizToMe = Vector3.new(origin.X - rootPos.X, 0, origin.Z - rootPos.Z)
+        horizToMe = horizToMe.Magnitude > 0.001 and horizToMe.Unit or Vector3.new(0, 0, 1)
+        if math.abs(target.Y - origin.Y) > 6 then
+            for _, h in ipairs({3, 6, 10, 14}) do
+                local up1 = rootPos + up * h
+                if checkPoint(up1, overlapParams) then
+                    table.insert(extHitboxes, up1)
+                end
+                for _, k in ipairs({3, 6, 10, 16}) do
+                    local pos = rootPos + horizToMe * k + up * h
+                    if checkPoint(pos, overlapParams) then
+                        table.insert(extHitboxes, pos)
+                    end
+                end
+            end
+        end
+        local extScans = {}
+        local function addScan(pos)
+            if #extScans < 260 and checkPoint(pos, overlapParams) then
+                table.insert(extScans, pos)
+            end
+        end
+        for _, r in ipairs(radii) do
+            if r < dist then
+                local base = origin + fwd * r
+                addScan(base)
+                addScan(base + up * 3)
+                addScan(base - up * 3)
+                addScan(base + right * 3)
+                addScan(base - right * 3)
+            end
+        end
+        if math.abs(target.Y - origin.Y) > 6 then
+            local vdir = target.Y > origin.Y and 1 or -1
+            local horizToTarget = Vector3.new(-horizToMe.X, 0, -horizToMe.Z)
+            local horizDist = Vector3.new(target.X - origin.X, 0, target.Z - origin.Z).Magnitude
+            for _, h in ipairs(radii) do
+                for _, w in ipairs({0, 3, 6, math.min(horizDist, range * 0.5)}) do
+                    addScan(origin + up * (vdir * h) + horizToTarget * math.min(w, horizDist))
+                end
+            end
+        end
+        local N = 34
+        for _, r in ipairs(radii) do
+            for i = 0, N - 1 do
+                if os.clock() > deadline then break end
+                local y = 1 - 2 * (i + 0.5) / N
+                local rr = math.sqrt(math.max(0, 1 - y * y))
+                local th = i * 2.399963
+                addScan(origin + Vector3.new(math.cos(th) * rr, y, math.sin(th) * rr) * r)
+            end
+        end
+        table.sort(extScans, function(a, b) return (a - target).Magnitude < (b - target).Magnitude end)
+        local rays = 0
+        for _, hitbox in ipairs(extHitboxes) do
+            for _, pos in ipairs(extScans) do
+                rays += 1
+                if rays > 1600 or os.clock() > deadline then
+                    self.Memory[part] = {t = os.clock(), fail = true}
+                    self.Fail[part] = true
+                    return nil
+                end
+                if not workspace:Raycast(hitbox, (pos - hitbox), rayParams) then
+                    local hit = hitbox ~= target and hitbox or nil
+                    self.Cache[part] = {pos, hit}
+                    self.Memory[part] = {t = os.clock(), pos = pos, hit = hit}
+                    return pos, hitbox
+                end
+            end
+        end
+        self.Memory[part] = {t = os.clock(), fail = true}
+        self.Fail[part] = true
+    end
+    return nil
+end
+
+local lastIgnoreUpdate = 0
+
+function OriginScanner:UpdateIgnore()
+    lastIgnoreUpdate = os.clock()
+    local ignoreList = {}
+    if LocalPlayer.Character then table.insert(ignoreList, LocalPlayer.Character) end
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr.Character then table.insert(ignoreList, plr.Character) end
+    end
+    rayParams.FilterDescendantsInstances = ignoreList
+    overlapParams.FilterDescendantsInstances = ignoreList
+end
+
+function OriginScanner:EnsureIgnore()
+    if os.clock() - lastIgnoreUpdate > 0.5 then
+        self:UpdateIgnore()
+    end
+end
+
+local localPositions = {}
+RunService.Heartbeat:Connect(function()
+    pcall(function()
+        table.clear(OriginScanner.Cache)
+        table.clear(OriginScanner.Fail)
+        local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+        if root then
+            while true do
+                local obj = localPositions[1]
+                if obj and (os.clock() - obj[2]) > 0.1 then
+                    table.remove(localPositions, 1)
+                else
+                    break
+                end
+            end
+            table.insert(localPositions, {root.Position, os.clock()})
+            OriginScanner.Offset = (root.Position - (localPositions[1] and localPositions[1][1] or root.Position)).Magnitude
+        else
+            table.clear(localPositions)
+        end
+    end)
+end)
+
+function wallbangBlocked(origin, position, part, character)
+    OriginScanner:EnsureIgnore()
+    local ray = workspace:Raycast(position, (origin - position), rayParams)
+    if ray or workspace:Raycast(origin, (position - origin), rayParams) then
+        local root = character and character:FindFirstChild("HumanoidRootPart")
+        local myRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+        if not root or not myRoot then return true end
+        part = part or root
+        return not OriginScanner:Scan(myRoot.Position, position, ray and ray.Position + ray.Normal * 0.01 or nil, part, root)
+    end
+    return false
+end
+
+function wallbangResolve(startPos, aimPos, targetPart)
+    if not (CFG.wallbang and startPos and aimPos and targetPart) then return nil end
+    local okAll, newOrigin, hit = pcall(function()
+        OriginScanner:EnsureIgnore()
+        local myRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+        local targetRoot = targetPart.Parent and (targetPart.Parent:FindFirstChild("HumanoidRootPart") or targetPart)
+        if not myRoot or not targetRoot then return nil end
+        local ray
+        if not OriginScanner.Cache[targetPart] then
+            ray = workspace:Raycast(aimPos, (startPos - aimPos), rayParams)
+        end
+        if OriginScanner.Cache[targetPart] or ray or workspace:Raycast(startPos, (aimPos - startPos), rayParams) then
+            return OriginScanner:Scan(myRoot.Position, aimPos, ray and ray.Position + ray.Normal * 0.01 or nil, targetPart, targetRoot)
+        end
+        return nil
+    end)
+    if okAll and newOrigin then return newOrigin, hit end
+    return nil
+end
+
+local wallbangPending = nil
+
+function wallbangRewriteShots(shots)
+    local pending = wallbangPending
+    if not (pending and CFG.wallbang and CFG.enabled) then return nil end
+    if os.clock() - pending.t > 0.6 then
+        wallbangPending = nil
+        return nil
+    end
+    if type(shots) ~= "table" then return nil end
+    local out, changed = {}, false
+    for i, shot in pairs(shots) do
+        if type(shot) == "table" and shot[3] ~= nil and shot[3] == pending.part then
+            local copy = {}
+            for k, v in pairs(shot) do copy[k] = v end
+            copy[1] = pending.origin
+            if pending.hit then copy[2] = pending.hit end
+            out[i] = copy
+            changed = true
+        else
+            out[i] = shot
+        end
+    end
+    if changed then return out end
+    return nil
+end
+
+local origCastRay
+local castRayHooked = false
+
+local function findCastRay()
+    if filtergc then
+        local ok, result = pcall(filtergc, "function", {Name = "castRay"}, true)
+        if ok and result then return result end
+    end
+    if getgc then
+        local ok, gc = pcall(getgc, false)
+        if ok and gc then
+            local debugInfo = debug and (debug.info or debug.getinfo)
+            if debugInfo then
+                for _, obj in ipairs(gc) do
+                    if type(obj) == "function" then
+                        local s, src = pcall(debugInfo, obj, "s")
+                        if s then
+                            local source = type(src) == "string" and src or (type(src) == "table" and (src.source or src.short_src)) or nil
+                            if source and source:find("castRay") then
+                                return obj
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return nil
+end
+
+local function castRayHandler(startPos, targetPos, ...)
+    if not CFG.enabled then return origCastRay(startPos, targetPos, ...) end
+    local closest, closestPos = getClosest(CFG.fov)
+    if not closest then return origCastRay(startPos, targetPos, ...) end
+    local gun = State.currentGun
+    local isTaser = gun and gun:GetAttribute("Projectile") == "Taser"
+    local isShotgun = gun and gun:GetAttribute("IsShotgun")
+    if CFG.hitchanceAutoOnly and isShotgun then
+        return origCastRay(startPos, targetPos, ...)
+    end
+    local targetPart, aimPos = getAimTarget(closest)
+    aimPos = aimPos or closestPos
+    if CFG.velocitylead and aimPos and targetPart and targetPart:IsA("BasePart") then
+        local ping = (LocalPlayer.GetNetworkPing and LocalPlayer:GetNetworkPing()) or 0.08
+        aimPos = aimPos + targetPart.AssemblyLinearVelocity * ping * (tonumber(CFG.velocityleadfactor) or 0.15)
+    end
+    if CFG.shotgungamehandled and isShotgun then
+        return origCastRay(startPos, aimPos or targetPos, ...)
+    end
+    local shouldHit
+    if CFG.taseralwayshit and isTaser then shouldHit = true
+    elseif CFG.ifplayerstill and isStanding(closest) then shouldHit = true
+    else shouldHit = rollHit() end
+    if shouldHit then
+        if targetPart and aimPos then
+            if CFG.shotgunnaturalspread and isShotgun then
+                return origCastRay(startPos, aimPos, ...)
+            end
+            if CFG.wallbang then
+                local newOrigin, hit = wallbangResolve(startPos, aimPos, targetPart)
+                if newOrigin then
+                    wallbangPending = {origin = newOrigin, hit = hit, part = targetPart, t = os.clock()}
+                    return targetPart, hit or aimPos
+                end
+            end
+            return targetPart, aimPos
+        end
+    else
+        if aimPos then
+            return origCastRay(startPos, getMissPos(aimPos), ...)
+        end
+    end
+    return origCastRay(startPos, targetPos, ...)
+end
+
+local function setupCastRayHook()
+    if castRayHooked or not hookfunction then return false end
+    local fn = findCastRay()
+    if not fn then return false end
+    local ok, result = pcall(hookfunction, fn, safeWrap(castRayHandler))
+    if not ok or type(result) ~= "function" then return false end
+    origCastRay = result
+    castRayHooked = true
+    return true
+end
+
+task.spawn(function()
+    for _ = 1, 60 do
+        if setupCastRayHook() then return end
+        task.wait(0.5)
+    end
+    warn("[Silent Aim] castRay hook not found (gun not equipped yet / executor unsupported).")
+end)
+
+local ShootEvent = ReplicatedStorage:WaitForChild("GunRemotes"):WaitForChild("ShootEvent")
+
+do
+    local installed = false
+    local function handler(old, self, ...)
+        if CFG.wallbang and rawequal(self, ShootEvent) then
+            local okM, method = pcall(getnamecallmethod)
+            if okM and method == "FireServer" then
+                local rewritten = wallbangRewriteShots((...))
+                if rewritten then
+                    return old(self, rewritten, select(2, ...))
+                end
+            end
+        end
+        return old(self, ...)
+    end
+    if hookmetamethod and getrawmetatable then
+        local previous
+        pcall(function()
+            local mt = getrawmetatable(game)
+            if mt and type(mt.__namecall) == "function" then
+                previous = mt.__namecall
+            end
+        end)
+        if type(previous) == "function" then
+            local old = previous
+            local ok = pcall(function()
+                local returned = hookmetamethod(game, "__namecall", safeWrap(function(self, ...)
+                    return handler(old, self, ...)
+                end))
+                if type(returned) == "function" then old = returned end
+            end)
+            installed = ok
+        end
+    elseif getrawmetatable and setreadonly then
+        pcall(function()
+            local mt = getrawmetatable(game)
+            local old = mt.__namecall
+            if type(old) ~= "function" then return end
+            if not pcall(setreadonly, mt, false) then return end
+            mt.__namecall = safeWrap(function(self, ...)
+                return handler(old, self, ...)
+            end)
+            pcall(setreadonly, mt, true)
+            installed = true
+        end)
+    end
+    if not installed then
+        warn("[Wallbang] could not install the namecall hook - wallbang shots will not be rewritten")
+    end
+end
+
+local function getGun()
+    local char = LocalPlayer.Character
+    if not char then return nil end
+    for _, tool in ipairs(char:GetChildren()) do
+        if tool:IsA("Tool") and tool:GetAttribute("ToolType") == "Gun" then
+            return tool
+        end
+    end
+    return nil
+end
+
+local lastGun = nil
+RunService.Heartbeat:Connect(function()
+    State.currentGun = getGun()
+    if State.currentGun ~= lastGun then
+        lastGun = State.currentGun
+    end
+end)
+
+-- ======================= UI (ScreenGui) =======================
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "SilentAimUI"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.IgnoreGuiInset = true
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+ScreenGui.DisplayOrder = 100
+ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+
+-- FOV circle (center of screen)
+local fovCircle = Instance.new("Frame")
+fovCircle.Name = "FovCircle"
+fovCircle.AnchorPoint = Vector2.new(0.5, 0.5)
+fovCircle.Position = UDim2.new(0.5, 0, 0.5, 0)
+fovCircle.BackgroundTransparency = 1
+fovCircle.Parent = ScreenGui
+
+local fovCorner = Instance.new("UICorner")
+fovCorner.CornerRadius = UDim.new(1, 0)
+fovCorner.Parent = fovCircle
+
+local fovStroke = Instance.new("UIStroke")
+fovStroke.Color = Color3.fromRGB(0, 0, 0)
+fovStroke.Thickness = 1.5
+fovStroke.Transparency = 0.15
+fovStroke.Parent = fovCircle
+
+local function refreshFovCircle()
+    local r = tonumber(CFG.fov) or 200
+    fovCircle.Size = UDim2.new(0, r * 2, 0, r * 2)
+end
+refreshFovCircle()
+
+-- "Manipulation" text below the crosshair
+local crosshairText = Instance.new("TextLabel")
+crosshairText.Name = "CrosshairText"
+crosshairText.AnchorPoint = Vector2.new(0.5, 0)
+crosshairText.Position = UDim2.new(0.5, 0, 0.5, 18)
+crosshairText.Size = UDim2.new(0, 240, 0, 16)
+crosshairText.BackgroundTransparency = 1
+applyFont(crosshairText)
+crosshairText.TextSize = 11
+crosshairText.TextColor3 = Color3.fromRGB(255, 80, 80)
+crosshairText.TextStrokeTransparency = 0
+crosshairText.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+crosshairText.Text = "manipulation"
+crosshairText.Visible = false
+crosshairText.Parent = ScreenGui
+
+-- Target line (drawn from crosshair to the locked target's head)
+local targetLine = Instance.new("Frame")
+targetLine.Name = "TargetLine"
+targetLine.AnchorPoint = Vector2.new(0.5, 0.5)
+targetLine.BackgroundColor3 = Color3.fromRGB(255, 60, 60)
+targetLine.BorderSizePixel = 0
+targetLine.Visible = false
+targetLine.ZIndex = 5
+targetLine.Parent = ScreenGui
+
+local targetLineStroke = Instance.new("UIStroke")
+targetLineStroke.Thickness = 1
+targetLineStroke.Color = Color3.fromRGB(0, 0, 0)
+targetLineStroke.Transparency = 0
+targetLineStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+targetLineStroke.Parent = targetLine
+
+local targetLineGlow = Instance.new("UIStroke")
+targetLineGlow.Thickness = 2
+targetLineGlow.Color = Color3.fromRGB(255, 60, 60)
+targetLineGlow.Transparency = 0.6
+targetLineGlow.Parent = targetLine
+
+-- ======================= Manipulation Status (always visible) =======================
+local manipulationStatus = Instance.new("TextLabel")
+manipulationStatus.Name = "ManipulationStatus"
+manipulationStatus.AnchorPoint = Vector2.new(0, 0)
+manipulationStatus.Position = UDim2.new(0, 12, 0, 12)
+manipulationStatus.Size = UDim2.new(0, 220, 0, 24)
+manipulationStatus.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+manipulationStatus.BackgroundTransparency = 0.35
+manipulationStatus.BorderSizePixel = 0
+applyFont(manipulationStatus)
+manipulationStatus.TextSize = 14
+manipulationStatus.TextXAlignment = Enum.TextXAlignment.Center
+manipulationStatus.TextColor3 = Color3.fromRGB(80, 255, 120)
+manipulationStatus.TextStrokeTransparency = 0
+manipulationStatus.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+manipulationStatus.Text = "manipulation : true"
+manipulationStatus.ZIndex = 10
+manipulationStatus.Parent = ScreenGui
+
+local manipulationStatusCorner = Instance.new("UICorner")
+manipulationStatusCorner.CornerRadius = UDim.new(0, 6)
+manipulationStatusCorner.Parent = manipulationStatus
+
+local manipulationStatusStroke = Instance.new("UIStroke")
+manipulationStatusStroke.Thickness = 1
+manipulationStatusStroke.Color = Color3.fromRGB(80, 255, 120)
+manipulationStatusStroke.Transparency = 0.2
+manipulationStatusStroke.Parent = manipulationStatus
+
+local function refreshManipulationStatus()
+    if CFG.wallbang then
+        manipulationStatus.Text = "manipulation : true"
+        manipulationStatus.TextColor3 = Color3.fromRGB(80, 255, 120)
+        manipulationStatusStroke.Color = Color3.fromRGB(80, 255, 120)
+    else
+        manipulationStatus.Text = "manipulation = false"
+        manipulationStatus.TextColor3 = Color3.fromRGB(255, 80, 80)
+        manipulationStatusStroke.Color = Color3.fromRGB(255, 80, 80)
+    end
+end
+refreshManipulationStatus()
+
+-- ======================= ESP Highlight (team colors) =======================
+local TEAM_COLORS = {
+    Guards = Color3.fromRGB(0, 150, 255),
+    Inmates = Color3.fromRGB(255, 165, 0),
+    Criminals = Color3.fromRGB(255, 60, 60),
+}
+
+local espData = {}
+
+local function getTeamColorFor(player)
+    if player and player.Team and TEAM_COLORS[player.Team.Name] then
+        return TEAM_COLORS[player.Team.Name]
+    end
+    return Color3.fromRGB(255, 255, 255)
+end
+
+local function createESP(player)
+    -- Container for UI labels (name + health)
+    local container = Instance.new("Frame")
+    container.Name = "ESP_" .. player.Name
+    container.BackgroundTransparency = 1
+    container.BorderSizePixel = 0
+    container.Visible = false
+    container.ZIndex = 4
+    container.Parent = ScreenGui
+
+    -- Team name (above the character)
+    local nameLabel = Instance.new("TextLabel")
+    nameLabel.Name = "NameLabel"
+    nameLabel.BackgroundTransparency = 1
+    nameLabel.Size = UDim2.new(1, 0, 0, 16)
+    nameLabel.Position = UDim2.new(0, 0, 0, -18)
+    nameLabel.TextSize = 13
+    nameLabel.TextStrokeTransparency = 0
+    nameLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+    nameLabel.TextXAlignment = Enum.TextXAlignment.Center
+    nameLabel.ZIndex = 6
+    applyFont(nameLabel)
+    nameLabel.Parent = container
+
+    -- Health text (right side of the character)
+    local healthLabel = Instance.new("TextLabel")
+    healthLabel.Name = "HealthLabel"
+    healthLabel.BackgroundTransparency = 1
+    healthLabel.Size = UDim2.new(0, 90, 0, 14)
+    healthLabel.Position = UDim2.new(1, 8, 0.5, -7)
+    healthLabel.TextSize = 12
+    healthLabel.TextStrokeTransparency = 0
+    healthLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+    healthLabel.TextXAlignment = Enum.TextXAlignment.Left
+    healthLabel.ZIndex = 6
+    applyFont(healthLabel)
+    healthLabel.Parent = container
+
+    local data = {
+        container = container,
+        name = nameLabel,
+        health = healthLabel,
+        highlight = nil,
+        char = nil,
+    }
+    espData[player] = data
+    return data
+end
+
+local function removeESP(player)
+    local data = espData[player]
+    if data then
+        if data.highlight then
+            data.highlight:Destroy()
+        end
+        if data.container then
+            data.container:Destroy()
+        end
+        espData[player] = nil
+    end
+end
+
+local function getCharacterCorners(char)
+    local cf, size
+    local ok = pcall(function()
+        cf, size = char:GetBoundingBox()
+    end)
+    if not ok or not cf then return nil end
+    local sx, sy, sz = size.X / 2, size.Y / 2, size.Z / 2
+    local corners = table.create(8)
+    for _, x in ipairs({-1, 1}) do
+        for _, y in ipairs({-1, 1}) do
+            for _, z in ipairs({-1, 1}) do
+                corners[#corners + 1] = cf * Vector3.new(x * sx, y * sy, z * sz)
+            end
+        end
+    end
+    return corners
+end
+
+local function updateESP()
+    local camera = workspace.CurrentCamera
+    if not camera then return end
+
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer then
+            local char = player.Character
+            local data = espData[player]
+            local hum = char and char:FindFirstChildOfClass("Humanoid")
+
+            if not char or not char.Parent or not hum or hum.Health <= 0 then
+                if data then
+                    data.container.Visible = false
+                    if data.highlight then
+                        data.highlight.Enabled = false
+                    end
+                end
+            else
+                if not data then
+                    data = createESP(player)
+                end
+
+                local color = getTeamColorFor(player)
+
+                -- Create / update Highlight
+                if not data.highlight or data.char ~= char then
+                    if data.highlight then
+                        data.highlight:Destroy()
+                    end
+                    local hl = Instance.new("Highlight")
+                    hl.Name = "ESP_Highlight"
+                    hl.Adornee = char
+                    hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+                    hl.FillColor = color
+                    hl.OutlineColor = color
+                    hl.FillTransparency = 0.75
+                    hl.OutlineTransparency = 0.45
+                    hl.Parent = ScreenGui
+                    data.highlight = hl
+                    data.char = char
+                else
+                    data.highlight.Adornee = char
+                    data.highlight.FillColor = color
+                    data.highlight.OutlineColor = color
+                    data.highlight.Enabled = true
+                end
+
+                -- Compute on-screen bounding box for UI labels
+                local corners = getCharacterCorners(char)
+                local minX, minY, maxX, maxY = math.huge, math.huge, -math.huge, -math.huge
+                local anyOnScreen = false
+                if corners then
+                    for _, c in ipairs(corners) do
+                        local sp, onScreen = camera:WorldToViewportPoint(c)
+                        if sp.Z > 0 then
+                            anyOnScreen = true
+                            if sp.X < minX then minX = sp.X end
+                            if sp.Y < minY then minY = sp.Y end
+                            if sp.X > maxX then maxX = sp.X end
+                            if sp.Y > maxY then maxY = sp.Y end
+                        end
+                    end
+                end
+
+                if anyOnScreen then
+                    local vs = camera.ViewportSize
+                    minX = math.clamp(minX, -vs.X, vs.X * 2)
+                    minY = math.clamp(minY, -vs.Y, vs.Y * 2)
+                    maxX = math.clamp(maxX, -vs.X, vs.X * 2)
+                    maxY = math.clamp(maxY, -vs.Y, vs.Y * 2)
+
+                    local w = maxX - minX
+                    local h = maxY - minY
+
+                    data.container.Position = UDim2.fromOffset(minX, minY)
+                    data.container.Size = UDim2.fromOffset(w, h)
+                    data.container.Visible = true
+
+                    data.name.TextColor3 = color
+                    data.name.Text = (player.Team and player.Team.Name) or player.Name
+
+                    local hp = math.max(0, math.floor(hum.Health))
+                    local maxHp = math.max(1, math.floor(hum.MaxHealth))
+                    data.health.Text = string.format("%d / %d", hp, maxHp)
+
+                    local ratio = hp / maxHp
+                    local hcolor
+                    if ratio > 0.6 then
+                        hcolor = Color3.fromRGB(80, 255, 120)
+                    elseif ratio > 0.3 then
+                        hcolor = Color3.fromRGB(255, 200, 60)
+                    else
+                        hcolor = Color3.fromRGB(255, 70, 70)
+                    end
+                    data.health.TextColor3 = hcolor
+                else
+                    data.container.Visible = false
+                end
+            end
+        end
+    end
+end
+
+Players.PlayerRemoving:Connect(function(player)
+    removeESP(player)
+end)
+
+RunService.RenderStepped:Connect(function()
+    pcall(updateESP)
+end)
+
+-- ======================= UI updater =======================
+local lastUITarget = nil
+local lastUITargetUpdate = 0
+local lastWallbangCheck = 0
+local canManipulateNow = false
+
+local function updateUITarget()
+    local now = os.clock()
+    if now - lastUITargetUpdate < 0.05 then return lastUITarget end
+    lastUITargetUpdate = now
+    local t = getClosest(CFG.fov)
+    lastUITarget = t
+    return t
+end
+
+local function updateManipulationText()
+    local now = os.clock()
+    if now - lastWallbangCheck < 0.2 then return canManipulateNow end
+    lastWallbangCheck = now
+    canManipulateNow = false
+    if not CFG.enabled or not CFG.wallbang then return false end
+    local target = updateUITarget()
+    if not target then return false end
+    local myChar = LocalPlayer.Character
+    local myHead = myChar and myChar:FindFirstChild("Head")
+    if not myHead then return false end
+    local targetPart, targetPos = getAimTarget(target)
+    if not targetPart or not targetPos then return false end
+    if not wallBetween(myHead.Position, targetPos, target.Character) then return false end
+    local ok, newOrigin = pcall(wallbangResolve, myHead.Position, targetPos, targetPart)
+    if ok and newOrigin then
+        canManipulateNow = true
+    end
+    return canManipulateNow
+end
+
+RunService.RenderStepped:Connect(function()
+    refreshManipulationStatus()
+    refreshFovCircle()
+
+    local camera = workspace.CurrentCamera
+    if not camera then return end
+    local vs = camera.ViewportSize
+    local center = Vector2.new(vs.X / 2, vs.Y / 2)
+
+    -- Target line to locked target's head
+    local target = updateUITarget()
+    if target and target.Character then
+        local headPart = getTargetPart(target.Character)
+        if headPart then
+            local sp, onScreen = camera:WorldToViewportPoint(headPart.Position)
+            if onScreen and sp.Z > 0 then
+                local targetScreen = Vector2.new(sp.X, sp.Y)
+                local delta = targetScreen - center
+                local dist = delta.Magnitude
+                if dist > 1 then
+                    local mid = (center + targetScreen) / 2
+                    local angle = math.deg(math.atan2(delta.Y, delta.X))
+                    targetLine.Size = UDim2.new(0, dist, 0, 1)
+                    targetLine.Position = UDim2.new(0, mid.X, 0, mid.Y)
+                    targetLine.Rotation = angle
+                    targetLine.Visible = true
+                else
+                    targetLine.Visible = false
+                end
+            else
+                targetLine.Visible = false
+            end
+        else
+            targetLine.Visible = false
+        end
+    else
+        targetLine.Visible = false
+    end
+
+    -- "manipulation" text below crosshair
+    if updateManipulationText() then
+        crosshairText.Visible = true
+    else
+        crosshairText.Visible = false
+    end
+end)
+
+genv.SilentAimCFG = CFG
+
+-- toggle: genv.SilentAimSetWallbang(true/false)
+genv.SilentAimSetWallbang = function(state)
+    CFG.wallbang = state and true or false
+    refreshManipulationStatus()
+end
+
+pcall(function()
+    StarterGui:SetCore("SendNotification", {
+        Title = "Silent Aim + Manipulation",
+        Text = "Enabled (Auto Shoot removed)",
+        Duration = 3,
+    })
+end)
