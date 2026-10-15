@@ -1,7 +1,7 @@
 local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/xqmt/Swiftly/refs/heads/main/Library.lua"))()
 
 local Window = Library:Window({
-    Name = "U T O P I A",
+    Name = "SUBATOMIC",
     GradientTitle = {
         Enabled = true,
         Start = Color3.fromRGB(255, 255, 255),
@@ -12,7 +12,7 @@ local Window = Library:Window({
 })
 
 
-local Watermark = Library:Watermark("This is a watermark LAOLASLDASLDASLLDSALDSL", {"77974153657891", Color3.fromRGB(149, 255, 139)})
+local Watermark = Library:Watermark("Subatomic.sys", {"77974153657891", Color3.fromRGB(149, 255, 139)})
 local KeybindList = Library:KeybindList()
 
 --Watermark:SetVisibility(false)
